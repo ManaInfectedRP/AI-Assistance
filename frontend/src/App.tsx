@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { ChatSearchBar } from './components/ChatSearchBar'
 import { ChatWindow } from './components/ChatWindow'
 import { InputBar } from './components/InputBar'
+import { KnowledgeSelector } from './components/KnowledgeSelector'
 import { ModelSelector } from './components/ModelSelector'
 import { Sidebar } from './components/Sidebar'
 import { TemplateSelector } from './components/TemplateSelector'
@@ -30,11 +31,14 @@ export default function App() {
   const templateId = activeConversation?.templateId ?? DEFAULT_TEMPLATE_ID
   const template = getTemplate(templateId)
 
+  const [knowledgeProject, setKnowledgeProject] = useState<string | null>(null)
+
   const { messages, isStreaming, model, setModel, webSearch, setWebSearch, sendMessage, stopStreaming } =
     useChat({
       conversationId: activeId,
       initialMessages: activeConversation?.messages ?? [],
       systemPrompt: template.systemPrompt,
+      knowledgeProject,
       onMessagesChange: (msgs) => {
         if (activeId) updateMessages(activeId, msgs)
       },
@@ -83,6 +87,11 @@ export default function App() {
             <TemplateSelector
               value={templateId}
               onChange={handleTemplateChange}
+              disabled={isStreaming}
+            />
+            <KnowledgeSelector
+              value={knowledgeProject}
+              onChange={setKnowledgeProject}
               disabled={isStreaming}
             />
             <ModelSelector value={model} onChange={setModel} disabled={isStreaming} />

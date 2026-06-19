@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     openrouter_api_key: str | None = None
+    projects_root: str = r"C:\Users\quo\repos"
 
     @property
     def cors_origins_list(self) -> list[str]:

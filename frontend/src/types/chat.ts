@@ -27,6 +27,7 @@ export interface ChatRequest {
   stream: boolean
   temperature?: number
   web_search?: boolean
+  knowledge_project?: string | null
 }
 
 export interface StreamChunk {

@@ -7,6 +7,7 @@ interface UseChatOptions {
   initialMessages?: Message[]
   systemPrompt?: string
   onMessagesChange?: (messages: Message[]) => void
+  knowledgeProject?: string | null
 }
 
 export function useChat({
@@ -14,6 +15,7 @@ export function useChat({
   initialMessages = [],
   systemPrompt,
   onMessagesChange,
+  knowledgeProject,
 }: UseChatOptions) {
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [isStreaming, setIsStreaming] = useState(false)
@@ -78,7 +80,12 @@ export function useChat({
       try {
         await streamChat(
           endpoint,
-          { messages: apiMessages, stream: true, web_search: webSearch },
+          {
+            messages: apiMessages,
+            stream: true,
+            web_search: webSearch,
+            knowledge_project: knowledgeProject ?? null,
+          },
           (delta) => {
             setMessages((prev) => {
               const updated = prev.map((m) =>
@@ -108,7 +115,7 @@ export function useChat({
         setIsStreaming(false)
       }
     },
-    [isStreaming, messages, model, webSearch, systemPrompt, updateMessages, onMessagesChange],
+    [isStreaming, messages, model, webSearch, knowledgeProject, systemPrompt, updateMessages, onMessagesChange],
   )
 
   const stopStreaming = useCallback(() => {
