@@ -31,7 +31,10 @@ async def _stream_ollama(
 ) -> AsyncGenerator[str, None]:
     url = f"{settings.ollama_base_url}/api/chat"
     payload = {"model": model_name, "messages": messages, "stream": True}
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    # connect timeout: fail fast if Ollama isn't running
+    # read timeout: None = no limit — models can take a long time on first load
+    timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", url, json=payload) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
