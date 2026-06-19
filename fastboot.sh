@@ -24,6 +24,7 @@ FRONTEND_PID=$!
 echo ""
 echo "Backend  → http://localhost:8000"
 echo "Frontend → http://localhost:5173"
+echo "CLI chat → python cli.py  (no servers needed)"
 echo "Press Ctrl+C to stop both."
 echo ""
 
