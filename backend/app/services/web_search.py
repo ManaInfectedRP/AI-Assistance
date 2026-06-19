@@ -12,6 +12,7 @@ Page scraping is async (httpx).
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -36,14 +37,31 @@ _NOISE_TAGS = [
 
 
 def _ddg_search(query: str, max_results: int) -> list[dict[str, Any]]:
-    """Synchronous DuckDuckGo search — call via asyncio.to_thread."""
-    try:
-        from duckduckgo_search import DDGS  # type: ignore[import-untyped]
-        with DDGS() as ddgs:
-            return list(ddgs.text(query, max_results=max_results))
-    except Exception as exc:
-        logger.warning("DDG search failed: %s", exc)
-        return []
+    """Synchronous DuckDuckGo search with retry on rate-limit."""
+    from duckduckgo_search import DDGS  # type: ignore[import-untyped]
+
+    delays = [1.5, 3.0, 6.0]   # back-off between attempts
+    for attempt, delay in enumerate(delays):
+        try:
+            with DDGS() as ddgs:
+                return list(ddgs.text(query, max_results=max_results))
+        except Exception as exc:
+            is_last = attempt == len(delays) - 1
+            exc_str = str(exc).lower()
+            is_rate_limit = "ratelimit" in exc_str or "202" in exc_str
+
+            if is_last:
+                logger.warning("DDG search failed after %d attempts: %s", len(delays), exc)
+                return []
+
+            if is_rate_limit:
+                logger.info("DDG rate-limited, retrying in %.1fs (attempt %d)…", delay, attempt + 1)
+            else:
+                logger.warning("DDG search error, retrying in %.1fs: %s", delay, exc)
+
+            time.sleep(delay)
+
+    return []
 
 
 async def _scrape(url: str, client: httpx.AsyncClient, max_chars: int = 1500) -> str:
