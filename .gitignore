@@ -13,6 +13,11 @@ frontend/dist/
 frontend/.env
 frontend/.env.local
 
+# PyInstaller build artifacts
+*.spec
+dist/
+build/
+
 # Editors / OS
 .DS_Store
 *.log
