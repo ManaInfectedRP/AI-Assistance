@@ -1,0 +1,37 @@
+{
+  "models": [
+    {
+      "title": "qwen3-coder (local)",
+      "provider": "ollama",
+      "model": "qwen3-coder",
+      "apiBase": "http://localhost:11434",
+      "contextLength": 32768
+    },
+    {
+      "title": "qwen3 (local chat)",
+      "provider": "ollama",
+      "model": "qwen3",
+      "apiBase": "http://localhost:11434",
+      "contextLength": 32768
+    }
+  ],
+  "defaultModel": "qwen3-coder (local)",
+  "tabAutocompleteModel": {
+    "title": "qwen3-coder (autocomplete)",
+    "provider": "ollama",
+    "model": "qwen3-coder",
+    "apiBase": "http://localhost:11434"
+  },
+  "contextProviders": [
+    { "name": "code", "params": {} },
+    { "name": "docs", "params": {} },
+    { "name": "diff", "params": {} },
+    { "name": "terminal", "params": {} },
+    { "name": "open", "params": {} }
+  ],
+  "slashCommands": [
+    { "name": "edit",    "description": "Edit highlighted code" },
+    { "name": "explain", "description": "Explain selected code" },
+    { "name": "tests",   "description": "Generate tests for selection" }
+  ]
+}
