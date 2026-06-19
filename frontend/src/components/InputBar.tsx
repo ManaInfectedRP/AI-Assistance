@@ -5,9 +5,11 @@ interface Props {
   onStop: () => void
   disabled: boolean
   isStreaming: boolean
+  webSearch: boolean
+  onWebSearchToggle: () => void
 }
 
-export function InputBar({ onSend, onStop, disabled, isStreaming }: Props) {
+export function InputBar({ onSend, onStop, disabled, isStreaming, webSearch, onWebSearchToggle }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const handleKeyDown = useCallback(
@@ -40,20 +42,31 @@ export function InputBar({ onSend, onStop, disabled, isStreaming }: Props) {
         rows={3}
         disabled={disabled && !isStreaming}
       />
-      {isStreaming ? (
-        <button onClick={onStop} className="btn btn-stop" type="button">
-          Stop
-        </button>
-      ) : (
+      <div className="input-bar-actions">
         <button
-          onClick={handleSend}
-          className="btn btn-send"
           type="button"
-          disabled={disabled}
+          onClick={onWebSearchToggle}
+          className={`btn-web-search ${webSearch ? 'active' : ''}`}
+          title={webSearch ? 'Web search ON — click to disable' : 'Web search OFF — click to enable'}
+          disabled={isStreaming}
         >
-          Send
+          🌐
         </button>
-      )}
+        {isStreaming ? (
+          <button onClick={onStop} className="btn btn-stop" type="button">
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={handleSend}
+            className="btn btn-send"
+            type="button"
+            disabled={disabled}
+          >
+            Send
+          </button>
+        )}
+      </div>
     </div>
   )
 }

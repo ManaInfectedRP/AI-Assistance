@@ -12,6 +12,7 @@ class ChatRequest(BaseModel):
     stream: bool = True
     temperature: float = 0.7
     max_tokens: int | None = None
+    web_search: bool = False
 
 
 class ChatChunk(BaseModel):

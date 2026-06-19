@@ -18,6 +18,7 @@ export function useChat({
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [isStreaming, setIsStreaming] = useState(false)
   const [model, setModel] = useState<ModelMode>('chat')
+  const [webSearch, setWebSearch] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   // Always holds the latest initialMessages so the switch effect reads fresh data
   const initialMessagesRef = useRef(initialMessages)
@@ -77,7 +78,7 @@ export function useChat({
       try {
         await streamChat(
           endpoint,
-          { messages: apiMessages, stream: true },
+          { messages: apiMessages, stream: true, web_search: webSearch },
           (delta) => {
             setMessages((prev) => {
               const updated = prev.map((m) =>
@@ -107,7 +108,7 @@ export function useChat({
         setIsStreaming(false)
       }
     },
-    [isStreaming, messages, model, systemPrompt, updateMessages, onMessagesChange],
+    [isStreaming, messages, model, webSearch, systemPrompt, updateMessages, onMessagesChange],
   )
 
   const stopStreaming = useCallback(() => {
@@ -120,6 +121,8 @@ export function useChat({
     isStreaming,
     model,
     setModel,
+    webSearch,
+    setWebSearch,
     sendMessage,
     stopStreaming,
   }

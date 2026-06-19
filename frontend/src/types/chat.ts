@@ -26,6 +26,7 @@ export interface ChatRequest {
   messages: ChatApiMessage[]
   stream: boolean
   temperature?: number
+  web_search?: boolean
 }
 
 export interface StreamChunk {

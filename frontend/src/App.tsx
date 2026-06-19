@@ -30,7 +30,7 @@ export default function App() {
   const templateId = activeConversation?.templateId ?? DEFAULT_TEMPLATE_ID
   const template = getTemplate(templateId)
 
-  const { messages, isStreaming, model, setModel, sendMessage, stopStreaming } =
+  const { messages, isStreaming, model, setModel, webSearch, setWebSearch, sendMessage, stopStreaming } =
     useChat({
       conversationId: activeId,
       initialMessages: activeConversation?.messages ?? [],
@@ -121,6 +121,8 @@ export default function App() {
           onStop={stopStreaming}
           disabled={false}
           isStreaming={isStreaming}
+          webSearch={webSearch}
+          onWebSearchToggle={() => setWebSearch((v) => !v)}
         />
       </main>
     </div>
