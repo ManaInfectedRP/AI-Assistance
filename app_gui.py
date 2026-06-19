@@ -8,6 +8,8 @@ import asyncio
 import json
 import os
 import queue
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -50,7 +52,322 @@ FONT_TITLE  = ("Segoe UI", 15, "bold")
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-# ── Ollama helpers ─────────────────────────────────────────────────────────────
+# ── Ollama setup helpers ───────────────────────────────────────────────────────
+OLLAMA_INSTALLER_URL = "https://ollama.com/download/OllamaSetup.exe"
+REQUIRED_MODELS      = [CHAT_MODEL, CODE_MODEL]   # qwen3, qwen3-coder
+
+
+def ollama_is_running() -> bool:
+    try:
+        with httpx.Client(timeout=3.0) as c:
+            return c.get(f"{OLLAMA_URL}/api/tags").status_code == 200
+    except Exception:
+        return False
+
+
+def get_installed_models() -> list[str]:
+    try:
+        with httpx.Client(timeout=3.0) as c:
+            data = c.get(f"{OLLAMA_URL}/api/tags").json()
+            return [m["name"].split(":")[0] for m in data.get("models", [])]
+    except Exception:
+        return []
+
+
+def download_ollama_installer(progress_cb) -> Path:
+    """Download OllamaSetup.exe to %TEMP%, calling progress_cb(fraction 0–1)."""
+    dest = Path(os.environ.get("TEMP", ".")) / "OllamaSetup.exe"
+    with httpx.Client(timeout=httpx.Timeout(connect=15.0, read=None)) as client:
+        with client.stream("GET", OLLAMA_INSTALLER_URL, follow_redirects=True) as resp:
+            resp.raise_for_status()
+            total = int(resp.headers.get("content-length", 0))
+            done  = 0
+            with open(dest, "wb") as f:
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    f.write(chunk)
+                    done += len(chunk)
+                    if total:
+                        progress_cb(done / total)
+    return dest
+
+
+def run_ollama_installer(path: Path):
+    """Run the installer silently (/S = silent mode for NSIS-based installers)."""
+    subprocess.run([str(path), "/S"], check=True)
+
+
+def start_ollama_server():
+    """Start 'ollama serve' as a background process."""
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+    except FileNotFoundError:
+        pass   # ollama not in PATH yet — installer may need a shell restart
+
+
+def pull_model_sync(model_name: str, status_cb, progress_cb, done_cb):
+    """
+    Pull a model via Ollama's streaming /api/pull endpoint.
+    status_cb(str)  — human-readable status line
+    progress_cb(float | None)  — 0.0–1.0 or None if total unknown
+    done_cb(bool)   — True = success, False = error
+    """
+    url = f"{OLLAMA_URL}/api/pull"
+    try:
+        with httpx.Client(timeout=httpx.Timeout(connect=10.0, read=None)) as client:
+            with client.stream("POST", url,
+                               json={"name": model_name, "stream": True}) as resp:
+                if resp.status_code != 200:
+                    status_cb(f"Error: HTTP {resp.status_code}")
+                    done_cb(False)
+                    return
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    status = data.get("status", "")
+                    completed = data.get("completed", 0)
+                    total     = data.get("total",     0)
+                    status_cb(status)
+                    progress_cb(completed / total if total else None)
+                    if status == "success":
+                        done_cb(True)
+                        return
+        done_cb(True)
+    except Exception as e:
+        status_cb(f"Error: {e}")
+        done_cb(False)
+
+
+# ── Setup window ───────────────────────────────────────────────────────────────
+class SetupWindow(ctk.CTkToplevel):
+    """
+    Modal window that guides the user through installing Ollama and
+    pulling the required models. Opens automatically on first launch
+    if Ollama isn't running, or from the sidebar ⚙ button.
+    """
+
+    def __init__(self, parent, on_ready_cb=None):
+        super().__init__(parent)
+        self.on_ready_cb = on_ready_cb
+        self.title("Setup — AI Assistant")
+        self.geometry("560x580")
+        self.resizable(False, False)
+        self.configure(fg_color=C_BG)
+        self.grab_set()   # modal
+        self.lift()
+
+        # ── Header ──
+        ctk.CTkLabel(self, text="Setup", font=("Segoe UI", 20, "bold"),
+                     text_color=C_WHITE).pack(pady=(24, 4))
+        ctk.CTkLabel(self, text="Install Ollama and download the AI models.",
+                     font=FONT_BODY, text_color=C_MUTED).pack()
+
+        # ── Step 1: Ollama ──
+        self._section("1  Install Ollama", 20)
+
+        self.ollama_icon  = ctk.CTkLabel(self, text="", font=("Segoe UI", 22))
+        self.ollama_icon.pack()
+        self.ollama_label = ctk.CTkLabel(self, text="", font=FONT_SMALL, text_color=C_MUTED)
+        self.ollama_label.pack()
+
+        self.ollama_progress = ctk.CTkProgressBar(self, width=460,
+                                                  progress_color=C_ACCENT)
+        self.ollama_progress.set(0)
+
+        self.install_btn = ctk.CTkButton(
+            self, text="Download & Install Ollama",
+            command=self._do_install_ollama,
+            fg_color=C_ACCENT, hover_color=C_ACCENT2,
+            font=FONT_BOLD, width=300, height=40,
+        )
+        self.install_btn.pack(pady=(8, 0))
+
+        # ── Step 2: Models ──
+        self._section("2  Download Models", 16)
+
+        self._model_rows: dict[str, dict] = {}
+        for model in REQUIRED_MODELS:
+            row = ctk.CTkFrame(self, fg_color=C_PANEL, corner_radius=8)
+            row.pack(fill="x", padx=40, pady=4)
+            row.columnconfigure(1, weight=1)
+
+            name_lbl = ctk.CTkLabel(row, text=model, font=FONT_BOLD,
+                                    text_color=C_TEXT, width=140, anchor="w")
+            name_lbl.grid(row=0, column=0, padx=12, pady=10)
+
+            status_lbl = ctk.CTkLabel(row, text="Checking…", font=FONT_SMALL,
+                                      text_color=C_MUTED, anchor="w")
+            status_lbl.grid(row=0, column=1, sticky="w")
+
+            bar = ctk.CTkProgressBar(row, width=180, progress_color=C_ACCENT, height=8)
+            bar.set(0)
+
+            btn = ctk.CTkButton(row, text="Pull", width=72, height=30,
+                                font=FONT_SMALL,
+                                fg_color=C_ACCENT, hover_color=C_ACCENT2,
+                                command=lambda m=model: self._do_pull(m))
+            btn.grid(row=0, column=2, padx=12)
+
+            self._model_rows[model] = {
+                "status": status_lbl, "bar": bar, "btn": btn, "row": row
+            }
+
+        # ── Done button ──
+        self.done_btn = ctk.CTkButton(
+            self, text="Start Chatting →",
+            command=self._finish,
+            fg_color=C_GREEN, hover_color="#16a34a",
+            font=FONT_BOLD, width=220, height=44,
+            state="disabled",
+        )
+        self.done_btn.pack(pady=(20, 0))
+
+        self._check_status()
+
+    def _section(self, title: str, pad_top: int):
+        f = ctk.CTkFrame(self, fg_color="transparent")
+        f.pack(fill="x", padx=40, pady=(pad_top, 6))
+        ctk.CTkFrame(f, fg_color=C_BORDER, height=1).pack(fill="x", pady=(0, 6))
+        ctk.CTkLabel(f, text=title, font=FONT_BOLD, text_color=C_WHITE,
+                     anchor="w").pack(anchor="w")
+
+    # ── Status checks ──────────────────────────────────────────────────────────
+    def _check_status(self):
+        threading.Thread(target=self._check_status_thread, daemon=True).start()
+
+    def _check_status_thread(self):
+        running = ollama_is_running()
+        self.after(0, self._apply_ollama_status, running)
+        if running:
+            models = get_installed_models()
+            self.after(0, self._apply_model_status, models)
+
+    def _apply_ollama_status(self, running: bool):
+        if running:
+            self.ollama_icon.configure(text="✅", text_color=C_GREEN)
+            self.ollama_label.configure(text="Ollama is running", text_color=C_GREEN)
+            self.install_btn.configure(state="disabled", text="Ollama installed ✓",
+                                       fg_color=C_PANEL)
+        else:
+            self.ollama_icon.configure(text="⬇️")
+            self.ollama_label.configure(
+                text="Ollama is not running. Click below to download and install.",
+                text_color=C_MUTED)
+
+    def _apply_model_status(self, installed: list[str]):
+        all_ready = True
+        for model, widgets in self._model_rows.items():
+            if model in installed:
+                widgets["status"].configure(text="Ready ✓", text_color=C_GREEN)
+                widgets["btn"].configure(state="disabled", text="✓",
+                                         fg_color=C_PANEL)
+            else:
+                widgets["status"].configure(text="Not downloaded", text_color=C_MUTED)
+                all_ready = False
+        if all_ready:
+            self.done_btn.configure(state="normal")
+
+    # ── Install Ollama ─────────────────────────────────────────────────────────
+    def _do_install_ollama(self):
+        self.install_btn.configure(state="disabled", text="Downloading…")
+        self.ollama_progress.pack(pady=(6, 0))
+        self.ollama_progress.set(0)
+        threading.Thread(target=self._install_thread, daemon=True).start()
+
+    def _install_thread(self):
+        try:
+            self.after(0, self.ollama_label.configure,
+                       {"text": "Downloading Ollama installer…", "text_color": C_MUTED})
+
+            path = download_ollama_installer(
+                lambda pct: self.after(0, self.ollama_progress.set, pct)
+            )
+            self.after(0, self.ollama_label.configure,
+                       {"text": "Running installer… (follow any prompts)", "text_color": C_MUTED})
+            self.after(0, self.ollama_progress.set, 1.0)
+
+            run_ollama_installer(path)
+
+            # Give Ollama a moment to start after install
+            self.after(0, self.ollama_label.configure,
+                       {"text": "Starting Ollama…", "text_color": C_MUTED})
+            start_ollama_server()
+            for _ in range(20):   # wait up to 10s
+                time.sleep(0.5)
+                if ollama_is_running():
+                    break
+
+            self.after(0, self._post_install)
+        except Exception as e:
+            self.after(0, self.ollama_label.configure,
+                       {"text": f"Error: {e}", "text_color": C_RED})
+            self.after(0, self.install_btn.configure,
+                       {"state": "normal", "text": "Retry"})
+
+    def _post_install(self):
+        running = ollama_is_running()
+        self._apply_ollama_status(running)
+        self.ollama_progress.pack_forget()
+        if running:
+            models = get_installed_models()
+            self._apply_model_status(models)
+
+    # ── Pull model ─────────────────────────────────────────────────────────────
+    def _do_pull(self, model: str):
+        if not ollama_is_running():
+            self._model_rows[model]["status"].configure(
+                text="Start Ollama first", text_color=C_RED)
+            return
+        w = self._model_rows[model]
+        w["btn"].configure(state="disabled", text="Pulling…")
+        w["status"].configure(text="Starting…", text_color=C_MUTED)
+        w["bar"].set(0)
+        w["bar"].grid(row=1, column=0, columnspan=3, padx=12, pady=(0, 8), sticky="ew")
+        threading.Thread(target=self._pull_thread, args=(model,), daemon=True).start()
+
+    def _pull_thread(self, model: str):
+        w = self._model_rows[model]
+
+        def status_cb(text):
+            # Shorten long layer hashes for display
+            short = text[:60] + "…" if len(text) > 60 else text
+            self.after(0, w["status"].configure, {"text": short, "text_color": C_MUTED})
+
+        def progress_cb(pct):
+            if pct is not None:
+                self.after(0, w["bar"].set, pct)
+
+        def done_cb(ok):
+            if ok:
+                self.after(0, w["status"].configure,
+                           {"text": "Ready ✓", "text_color": C_GREEN})
+                self.after(0, w["btn"].configure,
+                           {"state": "disabled", "text": "✓", "fg_color": C_PANEL})
+                self.after(0, w["bar"].grid_forget)
+                self.after(0, self._check_all_ready)
+            else:
+                self.after(0, w["btn"].configure, {"state": "normal", "text": "Retry"})
+
+        pull_model_sync(model, status_cb, progress_cb, done_cb)
+
+    def _check_all_ready(self):
+        models = get_installed_models()
+        if all(m in models for m in REQUIRED_MODELS):
+            self.done_btn.configure(state="normal")
+
+    def _finish(self):
+        self.grab_release()
+        self.destroy()
+        if self.on_ready_cb:
+            self.on_ready_cb()
+
+
+# ── Ollama streaming ───────────────────────────────────────────────────────────
 def stream_ollama_sync(messages: list[dict], model: str, out_queue: queue.Queue):
     """
     Synchronous wrapper — runs in a thread.
@@ -267,6 +584,7 @@ class App(ctk.CTk):
         self._build_ui()
         self._refresh_project_list()
         self.after(100, self._poll_stream_queue)
+        self.after(600, self._check_on_startup)   # slight delay so window renders first
 
     # ── UI construction ────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -354,6 +672,15 @@ class App(ctk.CTk):
             width=SIDEBAR_W - 32, font=FONT_SMALL,
         ).pack(padx=16, pady=(12, 0))
 
+        # Setup / install button
+        ctk.CTkButton(
+            self.sidebar, text="⚙  Setup / Install Models",
+            command=self._open_setup,
+            fg_color="transparent", hover_color=C_BORDER,
+            text_color=C_MUTED, border_width=1, border_color=C_BORDER,
+            width=SIDEBAR_W - 32, font=FONT_SMALL,
+        ).pack(padx=16, pady=(8, 0))
+
         # ── Main panel ──
         main = ctk.CTkFrame(self, fg_color=C_BG, corner_radius=0)
         main.pack(side="left", fill="both", expand=True)
@@ -425,6 +752,21 @@ class App(ctk.CTk):
                  "Toggle web search or load a project's knowledge docs from the sidebar.",
             font=FONT_BODY, text_color=C_MUTED, justify="center",
         ).pack(pady=(8, 0))
+
+    # ── Setup ─────────────────────────────────────────────────────────────────
+    def _open_setup(self):
+        SetupWindow(self, on_ready_cb=self._refresh_project_list)
+
+    def _check_on_startup(self):
+        """Open setup automatically if Ollama isn't running or models are missing."""
+        def _check():
+            if not ollama_is_running():
+                self.after(0, self._open_setup)
+                return
+            installed = get_installed_models()
+            if not all(m in installed for m in REQUIRED_MODELS):
+                self.after(0, self._open_setup)
+        threading.Thread(target=_check, daemon=True).start()
 
     # ── Sidebar callbacks ─────────────────────────────────────────────────────
     def _on_model_change(self, value: str):
