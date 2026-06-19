@@ -87,7 +87,10 @@ async def build_web_context(
         scraped = await asyncio.gather(*scrape_tasks)
 
     lines: list[str] = [
-        f'[Web search context for: "{query}"]',
+        f"[Web search context — live results fetched right now for: \"{query}\"]",
+        "IMPORTANT: The following is real-time data retrieved from the web seconds ago.",
+        "Use it to answer the user's question directly. Do NOT say you lack internet",
+        "access or cannot check current information — the search was already performed.",
         "---",
     ]
 

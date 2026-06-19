@@ -8,12 +8,15 @@ export interface PromptTemplate {
   modelHint: ModelMode
 }
 
+const WEB_SEARCH_AWARENESS = `
+When live web search results appear in your context (marked with [Web search context]), use them to answer directly and confidently. Do NOT say you lack internet access or cannot check current data — the search has already been done for you and the results are right there in your context.`
+
 export const PROMPT_TEMPLATES: PromptTemplate[] = [
   {
     id: 'general',
     name: 'General Assistant',
     description: 'Helpful all-purpose assistant',
-    systemPrompt: 'You are a helpful, knowledgeable assistant. Be concise and accurate.',
+    systemPrompt: `You are a helpful, knowledgeable assistant. Be concise and accurate.${WEB_SEARCH_AWARENESS}`,
     modelHint: 'chat',
   },
   {
@@ -25,7 +28,8 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
 - Point out style and readability improvements
 - Suggest more efficient or idiomatic approaches
 - Be specific: reference line numbers or variable names when possible
-- Prioritise feedback: critical > warning > suggestion`,
+- Prioritise feedback: critical > warning > suggestion
+${WEB_SEARCH_AWARENESS}`,
     modelHint: 'code',
   },
   {
@@ -37,7 +41,8 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
 - Structure content with headers, bullet points, and code examples
 - Write for the reader's level: assume technical competence, not domain knowledge
 - Include "why" not just "what" — context matters
-- Prefer active voice`,
+- Prefer active voice
+${WEB_SEARCH_AWARENESS}`,
     modelHint: 'chat',
   },
   {
@@ -49,7 +54,8 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
 - Evaluate trade-offs explicitly — no solution is perfect
 - Reference established patterns where appropriate
 - Ask clarifying questions before proposing solutions
-- Push back on over-engineering`,
+- Push back on over-engineering
+${WEB_SEARCH_AWARENESS}`,
     modelHint: 'chat',
   },
 ]
