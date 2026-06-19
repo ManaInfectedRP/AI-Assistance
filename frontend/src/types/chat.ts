@@ -12,13 +12,18 @@ export interface Conversation {
   id: string
   title: string
   messages: Message[]
+  templateId: string
   createdAt: number
   updatedAt: number
 }
 
+export interface ChatApiMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+}
+
 export interface ChatRequest {
-  messages: Pick<Message, 'role' | 'content'>[]
-  model?: ModelMode
+  messages: ChatApiMessage[]
   stream: boolean
   temperature?: number
 }

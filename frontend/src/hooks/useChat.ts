@@ -1,22 +1,35 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { streamChat } from '../api/client'
 import type { Message, ModelMode } from '../types/chat'
 
 interface UseChatOptions {
   conversationId: string | null
   initialMessages?: Message[]
+  systemPrompt?: string
   onMessagesChange?: (messages: Message[]) => void
 }
 
 export function useChat({
   conversationId,
   initialMessages = [],
+  systemPrompt,
   onMessagesChange,
 }: UseChatOptions) {
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [isStreaming, setIsStreaming] = useState(false)
   const [model, setModel] = useState<ModelMode>('chat')
   const abortRef = useRef<AbortController | null>(null)
+  // Always holds the latest initialMessages so the switch effect reads fresh data
+  const initialMessagesRef = useRef(initialMessages)
+  initialMessagesRef.current = initialMessages
+
+  // Reset messages when the active conversation changes
+  useEffect(() => {
+    abortRef.current?.abort()
+    setIsStreaming(false)
+    setMessages(initialMessagesRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId])
 
   const updateMessages = useCallback(
     (updated: Message[]) => {
@@ -52,15 +65,19 @@ export function useChat({
       abortRef.current = new AbortController()
       const endpoint = model === 'code' ? '/api/code' : '/api/chat'
 
+      // Build the API payload: optionally prepend the system prompt
+      const visibleMessages = nextMessages
+        .filter((m) => m.role !== 'assistant' || m.content)
+        .map(({ role, content }) => ({ role, content }))
+
+      const apiMessages = systemPrompt
+        ? [{ role: 'system' as const, content: systemPrompt }, ...visibleMessages]
+        : visibleMessages
+
       try {
         await streamChat(
           endpoint,
-          {
-            messages: nextMessages
-              .filter((m) => m.role !== 'assistant' || m.content)
-              .map(({ role, content }) => ({ role, content })),
-            stream: true,
-          },
+          { messages: apiMessages, stream: true },
           (delta) => {
             setMessages((prev) => {
               const updated = prev.map((m) =>
@@ -90,17 +107,13 @@ export function useChat({
         setIsStreaming(false)
       }
     },
-    [isStreaming, messages, model, updateMessages, onMessagesChange],
+    [isStreaming, messages, model, systemPrompt, updateMessages, onMessagesChange],
   )
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort()
     setIsStreaming(false)
   }, [])
-
-  const clearMessages = useCallback(() => {
-    updateMessages([])
-  }, [updateMessages])
 
   return {
     messages,
@@ -109,6 +122,5 @@ export function useChat({
     setModel,
     sendMessage,
     stopStreaming,
-    clearMessages,
   }
 }
