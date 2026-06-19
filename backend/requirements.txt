@@ -12,3 +12,5 @@ duckduckgo-search==8.0.1
 beautifulsoup4==4.13.4
 rich>=13.7.0
 prompt_toolkit>=3.0.0
+customtkinter>=5.2.0
+pyinstaller>=6.0.0
