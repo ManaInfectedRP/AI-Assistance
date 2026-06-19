@@ -184,15 +184,20 @@ def inject_context(messages: list[dict], context: str) -> list[dict]:
     return [{"role": "system", "content": context}] + messages
 
 # ── Input helper ──────────────────────────────────────────────────────────────
-def get_input(prompt_text: str, session=None) -> str:
-    """Read multiline input. Enter sends, Shift+Enter adds a newline."""
+async def get_input(prompt_text: str, session=None) -> str:
+    """Read input without blocking the event loop.
+
+    prompt_toolkit's sync .prompt() calls asyncio.run() internally, which
+    crashes when already inside a running loop. Use prompt_async() instead.
+    The plain-input fallback runs input() in a thread for the same reason.
+    """
     if HAS_PROMPT_TOOLKIT and session:
         try:
-            return session.prompt(prompt_text)
+            return await session.prompt_async(prompt_text)
         except (KeyboardInterrupt, EOFError):
             return "/exit"
     try:
-        return input(prompt_text)
+        return await asyncio.to_thread(input, prompt_text)
     except (KeyboardInterrupt, EOFError):
         return "/exit"
 
@@ -241,7 +246,7 @@ async def chat_loop(initial_model: str, initial_project: str | None):
 
     while True:
         # ── Prompt ──
-        user_input = get_input("\n[You] › ", session).strip()
+        user_input = (await get_input("\n[You] › ", session)).strip()
 
         if not user_input:
             continue
